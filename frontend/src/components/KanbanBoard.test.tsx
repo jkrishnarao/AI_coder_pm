@@ -11,6 +11,20 @@ describe("KanbanBoard", () => {
   beforeEach(() => {
     storedBoard = structuredClone(initialData);
     vi.spyOn(globalThis, "fetch").mockImplementation(async (_input, init) => {
+      if (_input === "/api/assistant") {
+        const cardId = "card-assistant-test";
+        storedBoard.cards[cardId] = {
+          id: cardId,
+          title: "Assistant task",
+          details: "Created from chat.",
+        };
+        storedBoard.columns[0].cardIds.push(cardId);
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ reply: "Added Assistant task to Backlog.", board: structuredClone(storedBoard) }),
+        } as Response;
+      }
       if (init?.method === "PUT") {
         storedBoard = JSON.parse(init.body as string) as BoardData;
       }
@@ -94,6 +108,24 @@ describe("KanbanBoard", () => {
         title: "Updated roadmap",
         details: "Revised notes",
       });
+    });
+  });
+
+  it("opens the assistant and renders a returned card without reloading", async () => {
+    render(<KanbanBoard />);
+    await screen.findAllByTestId(/column-/i);
+    await userEvent.click(screen.getByRole("button", { name: "AI assistant" }));
+    await userEvent.type(
+      screen.getByLabelText("Message the assistant"),
+      "Create a task"
+    );
+    await userEvent.click(screen.getByRole("button", { name: "Send" }));
+
+    expect(await screen.findByText("Added Assistant task to Backlog.")).toBeInTheDocument();
+    expect(screen.getByText("Assistant task")).toBeInTheDocument();
+    expect(storedBoard.cards["card-assistant-test"]).toMatchObject({
+      title: "Assistant task",
+      details: "Created from chat.",
     });
   });
 });

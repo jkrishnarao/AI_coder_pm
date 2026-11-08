@@ -30,6 +30,7 @@ async def chat_completion(
     client: httpx.AsyncClient | None = None,
     api_key: str | None = None,
     model: str | None = None,
+    response_format: Mapping[str, Any] | None = None,
 ) -> str:
     key = api_key or os.environ.get("OPENROUTER_API_KEY")
     if not key:
@@ -37,6 +38,12 @@ async def chat_completion(
 
     request_client = client or httpx.AsyncClient(timeout=30.0)
     request_model = model or os.environ.get("OPENROUTER_MODEL", DEFAULT_MODEL)
+    request_payload: dict[str, Any] = {
+        "model": request_model,
+        "messages": list(messages),
+    }
+    if response_format is not None:
+        request_payload["response_format"] = response_format
     try:
         try:
             response = await request_client.post(
@@ -46,7 +53,7 @@ async def chat_completion(
                     "HTTP-Referer": "http://localhost",
                     "X-Title": "Project Management MVP",
                 },
-                json={"model": request_model, "messages": list(messages)},
+                json=request_payload,
             )
             response.raise_for_status()
         except httpx.TimeoutException:

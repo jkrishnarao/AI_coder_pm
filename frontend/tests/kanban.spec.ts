@@ -2,7 +2,10 @@ import { expect, test } from "@playwright/test";
 
 async function stubAuthApi(page: import("@playwright/test").Page) {
   let authenticated = false;
-  let board = {
+  let board: {
+    columns: { id: string; title: string; cardIds: string[] }[];
+    cards: Record<string, { id: string; title: string; details: string }>;
+  } = {
     columns: [
       { id: "col-backlog", title: "Backlog", cardIds: ["card-1"] },
       { id: "col-discovery", title: "Discovery", cardIds: [] },
@@ -52,6 +55,35 @@ async function stubAuthApi(page: import("@playwright/test").Page) {
       board = route.request().postDataJSON();
     }
     await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(board) });
+  });
+
+  await page.route("**/api/assistant", async (route) => {
+    const request = route.request().postDataJSON() as { message: string };
+    if (request.message.toLowerCase().includes("summarize")) {
+      return route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          reply: "The board has one task in Backlog.",
+          board,
+        }),
+      });
+    }
+    const cardId = "card-assistant-1";
+    board.cards[cardId] = {
+      id: cardId,
+      title: "Assistant task",
+      details: "Created from chat.",
+    };
+    board.columns[0].cardIds.push(cardId);
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        reply: "Added Assistant task to Backlog.",
+        board,
+      }),
+    });
   });
 }
 
@@ -148,6 +180,62 @@ test("loads the kanban board", async ({ page }) => {
   await openBoard(page);
   await expect(page.getByRole("heading", { name: "Kanban Studio" })).toBeVisible();
   await expect(page.locator('[data-testid^="column-"]')).toHaveCount(5);
+});
+
+test("uses the assistant to create a board card", async ({ page }) => {
+  await openBoard(page);
+  await page.getByRole("button", { name: "AI assistant" }).click();
+  await page.getByLabel("Message the assistant").fill("Create a task for the launch");
+  await page.getByRole("button", { name: "Send" }).click();
+
+  await expect(page.getByText("Added Assistant task to Backlog.")).toBeVisible();
+  await expect(
+    page.getByTestId("column-col-backlog").getByText("Assistant task")
+  ).toBeVisible();
+});
+
+test("shows a reply-only assistant response without changing the board", async ({ page }) => {
+  await openBoard(page);
+  await page.getByRole("button", { name: "AI assistant" }).click();
+  await page.getByLabel("Message the assistant").fill("Summarize the board");
+  await page.getByRole("button", { name: "Send" }).click();
+
+  await expect(page.getByText("The board has one task in Backlog.")).toBeVisible();
+  await expect(page.getByTestId("column-col-backlog").getByTestId("card-card-1")).toBeVisible();
+  await expect(page.getByTestId("card-card-assistant-1")).toHaveCount(0);
+});
+
+test("retains the message when the assistant request fails", async ({ page }) => {
+  await openBoard(page);
+  await page.route("**/api/assistant", (route) =>
+    route.fulfill({
+      status: 502,
+      contentType: "application/json",
+      body: JSON.stringify({ detail: "AI assistant provider request failed" }),
+    })
+  );
+  await page.getByRole("button", { name: "AI assistant" }).click();
+  const composer = page.getByLabel("Message the assistant");
+  await composer.fill("Keep this available to retry");
+  await page.getByRole("button", { name: "Send" }).click();
+
+  await expect(
+    page.getByRole("complementary", { name: "Board assistant" }).getByRole("alert")
+  ).toHaveText(
+    "The AI assistant could not respond. Please try again."
+  );
+  await expect(composer).toHaveValue("Keep this available to retry");
+});
+
+test("shows the assistant drawer at a narrow viewport", async ({ page }) => {
+  await openBoard(page);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.getByRole("button", { name: "AI assistant" }).click();
+
+  const panel = page.getByRole("complementary", { name: "Board assistant" });
+  const bounds = await panel.boundingBox();
+  expect(bounds?.width).toBeLessThanOrEqual(390);
+  await expect(page.getByLabel("Message the assistant")).toBeVisible();
 });
 
 test("adds a card to a column", async ({ page }) => {

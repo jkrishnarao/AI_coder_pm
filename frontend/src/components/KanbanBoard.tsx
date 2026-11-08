@@ -13,14 +13,22 @@ import {
 } from "@dnd-kit/core";
 import { KanbanColumn } from "@/components/KanbanColumn";
 import { KanbanCardPreview } from "@/components/KanbanCardPreview";
+import { AssistantPanel } from "@/components/AssistantPanel";
 import { createId, moveCard, type BoardData } from "@/lib/kanban";
-import { loadBoard, saveBoard } from "@/lib/board-api";
+import {
+  loadBoard,
+  saveBoard,
+  sendAssistantMessage,
+  type AssistantMessage,
+} from "@/lib/board-api";
 
 export const KanbanBoard = () => {
   const [board, setBoard] = useState<BoardData | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [activeCardId, setActiveCardId] = useState<string | null>(null);
+  const [isAssistantOpen, setIsAssistantOpen] = useState(false);
+  const assistantButtonRef = useRef<HTMLButtonElement>(null);
   const lastQueuedBoard = useRef<string | null>(null);
   const saveQueue = useRef<Promise<void>>(Promise.resolve());
 
@@ -174,6 +182,22 @@ export const KanbanBoard = () => {
     });
   };
 
+  const handleAssistantSend = async (
+    message: string,
+    history: AssistantMessage[]
+  ): Promise<string> => {
+    await saveQueue.current;
+    const result = await sendAssistantMessage(message, history);
+    lastQueuedBoard.current = JSON.stringify(result.board);
+    setBoard(result.board);
+    return result.reply;
+  };
+
+  const closeAssistant = () => {
+    setIsAssistantOpen(false);
+    requestAnimationFrame(() => assistantButtonRef.current?.focus());
+  };
+
   const activeCard = activeCardId ? cardsById[activeCardId] : null;
 
   if (loadError) {
@@ -197,7 +221,7 @@ export const KanbanBoard = () => {
   }
 
   return (
-    <div className="relative overflow-hidden">
+    <div className="relative min-h-screen">
       <div className="pointer-events-none absolute left-0 top-0 h-[420px] w-[420px] -translate-x-1/3 -translate-y-1/3 rounded-full bg-[radial-gradient(circle,_rgba(32,157,215,0.25)_0%,_rgba(32,157,215,0.05)_55%,_transparent_70%)]" />
       <div className="pointer-events-none absolute bottom-0 right-0 h-[520px] w-[520px] translate-x-1/4 translate-y-1/4 rounded-full bg-[radial-gradient(circle,_rgba(117,57,145,0.18)_0%,_rgba(117,57,145,0.05)_55%,_transparent_75%)]" />
 
@@ -216,13 +240,25 @@ export const KanbanBoard = () => {
                 and capture quick notes without getting buried in settings.
               </p>
             </div>
-            <div className="rounded-2xl border border-[var(--stroke)] bg-[var(--surface)] px-5 py-4">
-              <p className="text-xs font-semibold uppercase tracking-[0.25em] text-[var(--gray-text)]">
-                Focus
-              </p>
-              <p className="mt-2 text-lg font-semibold text-[var(--primary-blue)]">
-                One board. Five columns. Zero clutter.
-              </p>
+            <div className="flex flex-wrap items-center gap-3">
+              <div className="rounded-2xl border border-[var(--stroke)] bg-[var(--surface)] px-5 py-4">
+                <p className="text-xs font-semibold uppercase tracking-[0.25em] text-[var(--gray-text)]">
+                  Focus
+                </p>
+                <p className="mt-2 text-lg font-semibold text-[var(--primary-blue)]">
+                  One board. Five columns. Zero clutter.
+                </p>
+              </div>
+              <button
+                ref={assistantButtonRef}
+                type="button"
+                aria-controls="board-assistant-panel"
+                aria-expanded={isAssistantOpen}
+                onClick={() => setIsAssistantOpen((open) => !open)}
+                className="rounded-md bg-[var(--secondary-purple)] px-4 py-3 text-sm font-semibold text-white hover:brightness-110"
+              >
+                AI assistant
+              </button>
             </div>
           </div>
           {saveError && (
@@ -243,33 +279,59 @@ export const KanbanBoard = () => {
           </div>
         </header>
 
-        <DndContext
-          sensors={sensors}
-          collisionDetection={closestCorners}
-          onDragStart={handleDragStart}
-          onDragEnd={handleDragEnd}
+        <div
+          className={
+            isAssistantOpen
+              ? "2xl:grid 2xl:grid-cols-[minmax(0,1fr)_360px] 2xl:items-start 2xl:gap-6"
+              : ""
+          }
         >
-          <section className="grid gap-6 lg:grid-cols-5">
-            {board.columns.map((column) => (
-              <KanbanColumn
-                key={column.id}
-                column={column}
-                cards={column.cardIds.map((cardId) => board.cards[cardId])}
-                onRename={handleRenameColumn}
-                onAddCard={handleAddCard}
-                onEditCard={handleEditCard}
-                onDeleteCard={handleDeleteCard}
+          <div className="min-w-0">
+            <DndContext
+              sensors={sensors}
+              collisionDetection={closestCorners}
+              onDragStart={handleDragStart}
+              onDragEnd={handleDragEnd}
+            >
+              <section className="grid gap-6 lg:grid-cols-5">
+                {board.columns.map((column) => (
+                  <KanbanColumn
+                    key={column.id}
+                    column={column}
+                    cards={column.cardIds.map((cardId) => board.cards[cardId])}
+                    onRename={handleRenameColumn}
+                    onAddCard={handleAddCard}
+                    onEditCard={handleEditCard}
+                    onDeleteCard={handleDeleteCard}
+                  />
+                ))}
+              </section>
+              <DragOverlay>
+                {activeCard ? (
+                  <div className="w-[260px]">
+                    <KanbanCardPreview card={activeCard} />
+                  </div>
+                ) : null}
+              </DragOverlay>
+            </DndContext>
+          </div>
+          {isAssistantOpen && (
+            <>
+              <button
+                type="button"
+                aria-label="Dismiss assistant drawer"
+                onClick={closeAssistant}
+                className="fixed inset-0 z-40 bg-black/30 2xl:hidden"
               />
-            ))}
-          </section>
-          <DragOverlay>
-            {activeCard ? (
-              <div className="w-[260px]">
-                <KanbanCardPreview card={activeCard} />
+              <div className="fixed inset-y-0 right-0 z-50 w-full max-w-[420px] 2xl:static 2xl:z-auto 2xl:w-auto 2xl:max-w-none">
+                <AssistantPanel
+                  onSend={handleAssistantSend}
+                  onClose={closeAssistant}
+                />
               </div>
-            ) : null}
-          </DragOverlay>
-        </DndContext>
+            </>
+          )}
+        </div>
       </main>
     </div>
   );

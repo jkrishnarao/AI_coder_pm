@@ -7,17 +7,17 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from starlette.middleware.sessions import SessionMiddleware
 
+from app.assistant import (
+    COLUMN_ID_VALUES,
+    AssistantOutputError,
+    handle_board_assistant,
+)
 from app.database import get_or_create_board, initialize_database, save_board
+from app.openrouter import OpenRouterConfigurationError, OpenRouterError
 
 USERNAME = "user"
 PASSWORD = "password"
-COLUMN_IDS = [
-    "col-backlog",
-    "col-discovery",
-    "col-progress",
-    "col-review",
-    "col-done",
-]
+COLUMN_IDS = list(COLUMN_ID_VALUES)
 
 
 class LoginRequest(BaseModel):
@@ -59,6 +59,26 @@ class BoardData(BaseModel):
         if any(card_id != card.id for card_id, card in self.cards.items()):
             raise ValueError("Card map keys must match card IDs")
         return self
+
+
+class ConversationMessage(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    role: str
+    content: str = Field(min_length=1, max_length=2000)
+
+    @model_validator(mode="after")
+    def validate_role(self) -> "ConversationMessage":
+        if self.role not in {"user", "assistant"}:
+            raise ValueError("Conversation history roles must be user or assistant")
+        return self
+
+
+class AssistantRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    message: str = Field(min_length=1, max_length=2000)
+    history: list[ConversationMessage] = Field(default_factory=list, max_length=20)
 
 
 def create_app(
@@ -109,6 +129,33 @@ def create_app(
         board_data = board.model_dump(by_alias=True)
         save_board(database_path, username, board_data)
         return board_data
+
+    @application.post("/api/assistant")
+    async def board_assistant(
+        payload: AssistantRequest, request: Request
+    ) -> dict[str, object]:
+        username = request.session.get("username")
+        if username != USERNAME:
+            raise HTTPException(status_code=401, detail="Not authenticated")
+        try:
+            return await handle_board_assistant(
+                database_path,
+                username,
+                payload.message,
+                [item.model_dump() for item in payload.history],
+            )
+        except OpenRouterConfigurationError:
+            raise HTTPException(
+                status_code=503, detail="AI assistant is not configured"
+            ) from None
+        except AssistantOutputError:
+            raise HTTPException(
+                status_code=502, detail="AI assistant returned an invalid response"
+            ) from None
+        except OpenRouterError:
+            raise HTTPException(
+                status_code=502, detail="AI assistant provider request failed"
+            ) from None
 
     @application.post("/api/auth/logout")
     def logout(request: Request) -> dict[str, str]:

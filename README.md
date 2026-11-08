@@ -6,7 +6,11 @@
 - how to check myself it is working
 - that is good. Part 2 is done. all are the success crieria for part 2 acheived
 - Proceed to part 3
-
+- iteration done till part 8
+- update the plan.md based on Agents.md and till now design and architecture changes done
+- create new chat   -> it will delete all the context
+-  Actually I want it to go all the way to opernrouter - no mocking - lets check we can get an anwer from the model
+- proceed to step 9
 
 # Project Management MVP
 

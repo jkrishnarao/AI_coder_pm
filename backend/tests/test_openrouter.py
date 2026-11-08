@@ -1,4 +1,5 @@
 import asyncio
+import json
 
 import httpx
 import pytest
@@ -61,6 +62,28 @@ def test_defaults_to_free_model(monkeypatch: pytest.MonkeyPatch) -> None:
             return await chat_completion(MESSAGES, client=client, api_key="test-key")
 
     assert asyncio.run(run()) == "4"
+
+
+def test_forwards_structured_response_format() -> None:
+    response_format = {
+        "type": "json_schema",
+        "json_schema": {"name": "test", "strict": True, "schema": {"type": "object"}},
+    }
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert json.loads(request.read())["response_format"] == response_format
+        return httpx.Response(200, json={"choices": [{"message": {"content": "{}"}}]})
+
+    async def run() -> str:
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            return await chat_completion(
+                MESSAGES,
+                client=client,
+                api_key="test-key",
+                response_format=response_format,
+            )
+
+    assert asyncio.run(run()) == "{}"
 
 
 def test_requires_api_key(monkeypatch: pytest.MonkeyPatch) -> None:
