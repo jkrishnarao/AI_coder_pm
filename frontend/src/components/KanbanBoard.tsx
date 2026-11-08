@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   DndContext,
   DragOverlay,
@@ -13,11 +13,63 @@ import {
 } from "@dnd-kit/core";
 import { KanbanColumn } from "@/components/KanbanColumn";
 import { KanbanCardPreview } from "@/components/KanbanCardPreview";
-import { createId, initialData, moveCard, type BoardData } from "@/lib/kanban";
+import { createId, moveCard, type BoardData } from "@/lib/kanban";
+import { loadBoard, saveBoard } from "@/lib/board-api";
 
 export const KanbanBoard = () => {
-  const [board, setBoard] = useState<BoardData>(() => initialData);
+  const [board, setBoard] = useState<BoardData | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [saveError, setSaveError] = useState<string | null>(null);
   const [activeCardId, setActiveCardId] = useState<string | null>(null);
+  const lastQueuedBoard = useRef<string | null>(null);
+  const saveQueue = useRef<Promise<void>>(Promise.resolve());
+
+  useEffect(() => {
+    let active = true;
+    loadBoard()
+      .then((loadedBoard) => {
+        if (active) {
+          lastQueuedBoard.current = JSON.stringify(loadedBoard);
+          setBoard(loadedBoard);
+        }
+      })
+      .catch((error: unknown) => {
+        if (active) {
+          setLoadError(
+            error instanceof Error ? error.message : "Unable to load the board."
+          );
+        }
+      });
+
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!board) {
+      return;
+    }
+
+    const serializedBoard = JSON.stringify(board);
+    if (serializedBoard === lastQueuedBoard.current) {
+      return;
+    }
+    const previousBoard = lastQueuedBoard.current;
+    lastQueuedBoard.current = serializedBoard;
+    saveQueue.current = saveQueue.current
+      .catch(() => undefined)
+      .then(() => saveBoard(board))
+      .then(() => setSaveError(null))
+      .catch((error: unknown) => {
+        if (lastQueuedBoard.current === serializedBoard) {
+          lastQueuedBoard.current = previousBoard;
+        }
+        setSaveError(
+          error instanceof Error ? error.message : "Unable to save the board."
+        );
+      });
+  }, [board]);
 
   const sensors = useSensors(
     useSensor(PointerSensor, {
@@ -25,7 +77,7 @@ export const KanbanBoard = () => {
     })
   );
 
-  const cardsById = useMemo(() => board.cards, [board.cards]);
+  const cardsById = useMemo(() => board?.cards ?? {}, [board?.cards]);
 
   const handleDragStart = (event: DragStartEvent) => {
     setActiveCardId(event.active.id as string);
@@ -39,39 +91,57 @@ export const KanbanBoard = () => {
       return;
     }
 
-    setBoard((prev) => ({
-      ...prev,
-      columns: moveCard(prev.columns, active.id as string, over.id as string),
-    }));
+    setBoard((prev) => {
+      if (!prev) {
+        return prev;
+      }
+      return {
+        ...prev,
+        columns: moveCard(prev.columns, active.id as string, over.id as string),
+      };
+    });
   };
 
   const handleRenameColumn = (columnId: string, title: string) => {
-    setBoard((prev) => ({
-      ...prev,
-      columns: prev.columns.map((column) =>
-        column.id === columnId ? { ...column, title } : column
-      ),
-    }));
+    setBoard((prev) => {
+      if (!prev) {
+        return prev;
+      }
+      return {
+        ...prev,
+        columns: prev.columns.map((column) =>
+          column.id === columnId ? { ...column, title } : column
+        ),
+      };
+    });
   };
 
   const handleAddCard = (columnId: string, title: string, details: string) => {
     const id = createId("card");
-    setBoard((prev) => ({
-      ...prev,
-      cards: {
-        ...prev.cards,
-        [id]: { id, title, details: details || "No details yet." },
-      },
-      columns: prev.columns.map((column) =>
-        column.id === columnId
-          ? { ...column, cardIds: [...column.cardIds, id] }
-          : column
-      ),
-    }));
+    setBoard((prev) => {
+      if (!prev) {
+        return prev;
+      }
+      return {
+        ...prev,
+        cards: {
+          ...prev.cards,
+          [id]: { id, title, details: details || "No details yet." },
+        },
+        columns: prev.columns.map((column) =>
+          column.id === columnId
+            ? { ...column, cardIds: [...column.cardIds, id] }
+            : column
+        ),
+      };
+    });
   };
 
   const handleDeleteCard = (columnId: string, cardId: string) => {
     setBoard((prev) => {
+      if (!prev) {
+        return prev;
+      }
       return {
         ...prev,
         cards: Object.fromEntries(
@@ -89,7 +159,42 @@ export const KanbanBoard = () => {
     });
   };
 
+  const handleEditCard = (cardId: string, title: string, details: string) => {
+    setBoard((prev) => {
+      if (!prev) {
+        return prev;
+      }
+      return {
+        ...prev,
+        cards: {
+          ...prev.cards,
+          [cardId]: { ...prev.cards[cardId], title, details },
+        },
+      };
+    });
+  };
+
   const activeCard = activeCardId ? cardsById[activeCardId] : null;
+
+  if (loadError) {
+    return (
+      <main className="flex min-h-[50vh] items-center justify-center px-6">
+        <p role="alert" className="max-w-md text-center text-sm text-red-700">
+          {loadError}
+        </p>
+      </main>
+    );
+  }
+
+  if (!board) {
+    return (
+      <main className="flex min-h-[50vh] items-center justify-center px-6" aria-busy="true">
+        <p role="status" className="text-sm font-medium text-[var(--gray-text)]">
+          Loading your board...
+        </p>
+      </main>
+    );
+  }
 
   return (
     <div className="relative overflow-hidden">
@@ -120,6 +225,11 @@ export const KanbanBoard = () => {
               </p>
             </div>
           </div>
+          {saveError && (
+            <p role="alert" className="text-sm font-medium text-red-700">
+              {saveError}
+            </p>
+          )}
           <div className="flex flex-wrap items-center gap-4">
             {board.columns.map((column) => (
               <div
@@ -147,6 +257,7 @@ export const KanbanBoard = () => {
                 cards={column.cardIds.map((cardId) => board.cards[cardId])}
                 onRename={handleRenameColumn}
                 onAddCard={handleAddCard}
+                onEditCard={handleEditCard}
                 onDeleteCard={handleDeleteCard}
               />
             ))}

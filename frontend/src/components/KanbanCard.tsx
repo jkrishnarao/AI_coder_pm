@@ -1,3 +1,4 @@
+import { useState, type FormEvent } from "react";
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import clsx from "clsx";
@@ -5,16 +6,29 @@ import type { Card } from "@/lib/kanban";
 
 type KanbanCardProps = {
   card: Card;
+  onEdit: (cardId: string, title: string, details: string) => void;
   onDelete: (cardId: string) => void;
 };
 
-export const KanbanCard = ({ card, onDelete }: KanbanCardProps) => {
+export const KanbanCard = ({ card, onEdit, onDelete }: KanbanCardProps) => {
+  const [isEditing, setIsEditing] = useState(false);
+  const [title, setTitle] = useState(card.title);
+  const [details, setDetails] = useState(card.details);
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
     useSortable({ id: card.id });
 
   const style = {
     transform: CSS.Transform.toString(transform),
     transition,
+  };
+
+  const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!title.trim()) {
+      return;
+    }
+    onEdit(card.id, title.trim(), details.trim());
+    setIsEditing(false);
   };
 
   return (
@@ -30,24 +44,75 @@ export const KanbanCard = ({ card, onDelete }: KanbanCardProps) => {
       {...listeners}
       data-testid={`card-${card.id}`}
     >
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <h4 className="font-display text-base font-semibold text-[var(--navy-dark)]">
-            {card.title}
-          </h4>
-          <p className="mt-2 text-sm leading-6 text-[var(--gray-text)]">
-            {card.details}
-          </p>
+      {isEditing ? (
+        <form onSubmit={handleSubmit} className="space-y-3">
+          <label className="sr-only" htmlFor={`title-${card.id}`}>
+            Card title
+          </label>
+          <input
+            id={`title-${card.id}`}
+            value={title}
+            onChange={(event) => setTitle(event.target.value)}
+            className="w-full rounded-lg border border-[var(--stroke)] px-3 py-2 text-sm"
+            required
+          />
+          <label className="sr-only" htmlFor={`details-${card.id}`}>
+            Card details
+          </label>
+          <textarea
+            id={`details-${card.id}`}
+            value={details}
+            onChange={(event) => setDetails(event.target.value)}
+            rows={3}
+            className="w-full resize-none rounded-lg border border-[var(--stroke)] px-3 py-2 text-sm"
+          />
+          <div className="flex gap-2">
+            <button type="submit" className="text-xs font-semibold text-[var(--primary-blue)]">
+              Save changes
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setTitle(card.title);
+                setDetails(card.details);
+                setIsEditing(false);
+              }}
+              className="text-xs font-semibold text-[var(--gray-text)]"
+            >
+              Cancel
+            </button>
+          </div>
+        </form>
+      ) : (
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <h4 className="font-display text-base font-semibold text-[var(--navy-dark)]">
+              {card.title}
+            </h4>
+            <p className="mt-2 text-sm leading-6 text-[var(--gray-text)]">
+              {card.details}
+            </p>
+          </div>
+          <div className="flex shrink-0 flex-col items-end gap-1">
+            <button
+              type="button"
+              onClick={() => setIsEditing(true)}
+              className="px-2 py-1 text-xs font-semibold text-[var(--primary-blue)]"
+              aria-label={`Edit ${card.title}`}
+            >
+              Edit
+            </button>
+            <button
+              type="button"
+              onClick={() => onDelete(card.id)}
+              className="rounded-full border border-transparent px-2 py-1 text-xs font-semibold text-[var(--gray-text)] transition hover:border-[var(--stroke)] hover:text-[var(--navy-dark)]"
+              aria-label={`Delete ${card.title}`}
+            >
+              Remove
+            </button>
+          </div>
         </div>
-        <button
-          type="button"
-          onClick={() => onDelete(card.id)}
-          className="rounded-full border border-transparent px-2 py-1 text-xs font-semibold text-[var(--gray-text)] transition hover:border-[var(--stroke)] hover:text-[var(--navy-dark)]"
-          aria-label={`Delete ${card.title}`}
-        >
-          Remove
-        </button>
-      </div>
+      )}
     </article>
   );
 };

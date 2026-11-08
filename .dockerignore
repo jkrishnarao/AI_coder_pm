@@ -1,0 +1,11 @@
+.env
+.git
+.next
+frontend/out
+frontend/coverage
+**/node_modules
+**/__pycache__
+**/.pytest_cache
+**/.venv
+frontend/test-results
+frontend/coverage

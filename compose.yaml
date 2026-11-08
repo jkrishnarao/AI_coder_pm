@@ -1,0 +1,20 @@
+name: pm-mvp
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "${PM_PORT:-8000}:8000"
+    environment:
+      DB_PATH: /app/data/kanban.sqlite3
+      SESSION_SECRET: ${SESSION_SECRET:-}
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      OPENROUTER_MODEL: ${OPENROUTER_MODEL:-openrouter/free}
+    volumes:
+      - app-data:/app/data
+    restart: unless-stopped
+
+volumes:
+  app-data:
