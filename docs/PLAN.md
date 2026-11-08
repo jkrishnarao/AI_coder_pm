@@ -17,6 +17,25 @@
 - Keep a separate, explicitly invoked OpenRouter smoke test for the `2+2` connectivity check. It requires a configured key and must not run as part of ordinary offline test suites.
 - Run relevant tests and lint/type checks at each stage. A stage is complete only when its listed tests pass and its success criteria are met.
 
+## Current Architecture and Design Baseline
+
+These are the implementation decisions currently reflected in the code. Where they differ from the original stage order, the implementation was delivered early to support the working MVP and persistence fix.
+
+### Architecture
+
+- The Next.js frontend is statically exported. A multi-stage Docker build produces the static assets and packages them with the FastAPI backend; FastAPI serves the frontend at `/` and registers `/api/*` routes before its static mount.
+- Docker Compose runs one app service and stores SQLite data in the persistent `app-data` volume. The database path is configurable with `DB_PATH`.
+- Authentication uses the MVP `user` / `password` credentials and a signed, HTTP-only, SameSite=Lax session cookie with a 12-hour lifetime. `SESSION_SECRET` should be set to preserve sessions across restarts.
+- SQLite has a `users` table (`id` primary key, unique `username`) and a `boards` table (`user_id` primary key and foreign key to `users`, serialized `board_json`, `updated_at`). The current initializer creates missing tables and seeds the MVP user; it does not yet include versioned schema migrations.
+- A board JSON document contains `columns` and `cards`. Columns have stable fixed IDs, editable titles, and ordered `cardIds`; cards are keyed by ID and contain `id`, `title`, and `details`. Backend validation enforces the fixed column IDs/order and that each card appears in exactly one column. The full validated board snapshot is stored per user and seeded from `backend/app/default_board.json`.
+- OpenRouter credentials and requests stay in the backend. The connectivity smoke test is an explicit CLI command, not a URL/API route; `/api/health` checks app health only. The AI board-assistant API is planned for Part 9.
+
+### Frontend Design
+
+- Product name: Kanban Studio. The interface uses Space Grotesk for display text and Manrope for body text.
+- Existing palette tokens are accent yellow `#ecad0a`, primary blue `#209dd7`, secondary purple `#753991`, dark navy `#032147`, and gray text `#888888`, with white and pale-gray surfaces. Tokens are defined in `frontend/src/app/globals.css`.
+- The root page gates the board behind backend session verification; the authenticated view is the existing single-board workflow. The AI chat sidebar remains planned for Part 10.
+
 ## Part 1: Plan and Approval
 
 ### Checklist
@@ -122,22 +141,25 @@ Status: complete. The board is gated by a backend-verified signed session cookie
 
 ## Part 5: Database Modeling and Sign-Off
 
+Status: the data model and persistence implementation were delivered early in Parts 6 and 7. The current representation and SQLite mapping are recorded in the architecture baseline above; formal schema artifact validation and user sign-off remain outstanding.
+
 ### Checklist
 
-- [ ] Propose a JSON representation/schema for users, a user's single board, fixed columns, and cards.
-- [ ] Document the SQLite tables, keys, relationships, and initialization/migration approach in `docs/`.
-- [ ] Define how the fixed column set and user-to-board ownership are represented while allowing column titles to be renamed.
+- [x] Document the implemented JSON board representation for fixed columns and cards.
+- [x] Document the SQLite tables, keys, relationships, and current initialization behavior in this plan.
+- [x] Record how fixed column IDs and user-to-board ownership are represented while allowing column titles to be renamed.
+- [ ] Create and validate a formal JSON Schema artifact for the persisted board shape.
 - [ ] Review the proposal with the user and record approval before implementation.
 
 ### Tests and Review
 
-- Validate the JSON artifact against its declared schema using a standard JSON/schema validator.
+- [ ] Validate the formal JSON Schema artifact using a standard JSON/schema validator.
 - Review examples for empty and populated boards, stable IDs, and the one-board-per-user constraint.
-- No production database code is required before sign-off.
+- Note: production database code was implemented early to resolve the persistence issue; do not treat Part 5 as signed off until the formal schema and user review are complete.
 
 ### Success Criteria
 
-- The data shape and SQLite mapping are documented, internally consistent, and approved by the user before Part 6.
+- The data shape and SQLite mapping are documented; the formal schema artifact and user approval remain required to close Part 5.
 
 ## Part 6: Persistent Backend API
 
